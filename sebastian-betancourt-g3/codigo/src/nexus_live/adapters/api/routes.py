@@ -183,14 +183,6 @@ def create_router(container: Container) -> APIRouter:
                 "reason": "IDEMPOTENCY_CONFLICT",
                 "detail": str(e),
             })
-        except Exception as e:
-            if "Circuit breaker" in str(e):
-                raise HTTPException(status_code=503, detail={
-                    "status": "REJECTED",
-                    "reason": "PAYMENT_SERVICE_UNAVAILABLE",
-                    "detail": str(e),
-                })
-            raise
 
         if hasattr(result, "confirmation_id") and result.confirmation_id:
             return ConfirmResponseSchema(

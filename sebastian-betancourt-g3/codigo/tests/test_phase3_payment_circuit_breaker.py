@@ -229,7 +229,7 @@ class TestCircuitBreaker:
                 pass
 
         assert cb.state.value == "OPEN"
-        with pytest.raises(Exception, match="Circuit breaker"):
+        with pytest.raises(PaymentServiceUnavailableError):
             cb.call(lambda: PaymentResult.APPROVED)
 
     def test_circuit_transitions_to_half_open(self):
@@ -301,4 +301,102 @@ class TestCircuitBreaker:
         assert cb.state.value == "CLOSED"
 
 
+class TestCircuitBreakerWithConfirmUseCase:
+    """Tests del circuit breaker integrado con el caso de uso de confirmacion."""
+
+    def test_cb_open_returns_rejected_response_not_exception(self):
+        """Cuando el CB esta OPEN, el use case retorna RejectedResponse, no excepcion."""
+        from nexus_live.adapters.api.composition import build_container
+        container = build_container(
+            payment_force_result=PaymentResult.ERROR,
+            cb_failure_threshold=2,
+        )
+        IdGenerator.reset()
+
+        hold1 = container.hold_seats.execute(HoldSeatsRequest(
+            user_id="usr_001", event_id="evt", seat_ids=["A-101"]
+        ))
+        container.confirm_hold.execute(ConfirmRequest(
+            hold_id=hold1.hold_id, payment_token="tok"
+        ))
+        hold2 = container.hold_seats.execute(HoldSeatsRequest(
+            user_id="usr_002", event_id="evt", seat_ids=["A-102"]
+        ))
+        container.confirm_hold.execute(ConfirmRequest(
+            hold_id=hold2.hold_id, payment_token="tok"
+        ))
+
+        assert container.circuit_breaker.state.value == "OPEN"
+
+        hold3 = container.hold_seats.execute(HoldSeatsRequest(
+            user_id="usr_003", event_id="evt", seat_ids=["A-103"]
+        ))
+        result = container.confirm_hold.execute(ConfirmRequest(
+            hold_id=hold3.hold_id, payment_token="tok"
+        ))
+
+        assert result.reason == "payment_service_unavailable"
+        assert "circuit breaker" in result.detail.lower()
+
+    def test_cb_open_does_not_sell_seat(self):
+        """Cuando el CB esta OPEN, el asiento NO se marca como SOLD."""
+        from nexus_live.adapters.api.composition import build_container
+        container = build_container(
+            payment_force_result=PaymentResult.ERROR,
+            cb_failure_threshold=2,
+        )
+        IdGenerator.reset()
+
+        for i in range(2):
+            hold = container.hold_seats.execute(HoldSeatsRequest(
+                user_id=f"usr_{i}", event_id="evt", seat_ids=[f"A-10{i+1}"]
+            ))
+            container.confirm_hold.execute(ConfirmRequest(
+                hold_id=hold.hold_id, payment_token="tok"
+            ))
+
+        hold3 = container.hold_seats.execute(HoldSeatsRequest(
+            user_id="usr_003", event_id="evt", seat_ids=["A-103"]
+        ))
+        container.confirm_hold.execute(ConfirmRequest(
+            hold_id=hold3.hold_id, payment_token="tok"
+        ))
+
+        seats = container.list_seats.execute()
+        seat = next(s for s in seats if s.seat_id == "A-103")
+        assert seat.status == "HELD"
+
+    def test_cb_open_records_audit_transition(self):
+        """Cuando el CB esta OPEN, se registra la transicion en la auditoria."""
+        from nexus_live.adapters.api.composition import build_container
+        container = build_container(
+            payment_force_result=PaymentResult.ERROR,
+            cb_failure_threshold=2,
+        )
+        IdGenerator.reset()
+
+        for i in range(2):
+            hold = container.hold_seats.execute(HoldSeatsRequest(
+                user_id=f"usr_{i}", event_id="evt", seat_ids=[f"A-10{i+1}"]
+            ))
+            container.confirm_hold.execute(ConfirmRequest(
+                hold_id=hold.hold_id, payment_token="tok"
+            ))
+
+        hold3 = container.hold_seats.execute(HoldSeatsRequest(
+            user_id="usr_003", event_id="evt", seat_ids=["A-103"]
+        ))
+        container.confirm_hold.execute(ConfirmRequest(
+            hold_id=hold3.hold_id, payment_token="tok"
+        ))
+
+        transitions = container.audit_log.get_by_hold(hold3.hold_id)
+        cb_transitions = [
+            t for t in transitions
+            if t.reason.value == "payment_service_unavailable"
+        ]
+        assert len(cb_transitions) == 1
+
+
 from nexus_live.domain.exceptions import HoldNotActiveError
+from nexus_live.domain.exceptions import PaymentServiceUnavailableError
