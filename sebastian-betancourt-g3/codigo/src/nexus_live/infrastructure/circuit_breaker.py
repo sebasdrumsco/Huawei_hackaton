@@ -20,6 +20,7 @@ import time
 from typing import Optional
 
 from ..domain.enums import CircuitState, PaymentResult
+from ..domain.exceptions import PaymentServiceUnavailableError
 
 
 class CircuitBreaker:
@@ -70,19 +71,19 @@ class CircuitBreaker:
             PaymentResult de la operación.
 
         Raises:
-            Exception: con mensaje "Circuit breaker is OPEN" si el
-                circuit está OPEN y no se permite la llamada.
+            PaymentServiceUnavailableError: si el circuit está OPEN y no se
+                permite la llamada.
         """
         with self._lock:
             if self._state == CircuitState.OPEN:
                 self._maybe_transition_to_half_open()
 
             if self._state == CircuitState.OPEN:
-                raise Exception("Circuit breaker is OPEN")
+                raise PaymentServiceUnavailableError()
 
             if self._state == CircuitState.HALF_OPEN:
                 if self._half_open_calls >= self._half_open_max_calls:
-                    raise Exception("Circuit breaker is OPEN (HALF_OPEN limit reached)")
+                    raise PaymentServiceUnavailableError()
                 self._half_open_calls += 1
 
         try:

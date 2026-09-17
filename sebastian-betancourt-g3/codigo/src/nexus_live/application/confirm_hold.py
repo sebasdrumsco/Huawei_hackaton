@@ -104,9 +104,12 @@ class ConfirmHoldUseCase:
         if hold.is_expired(self._clock.now()):
             raise HoldExpiredError(request.hold_id)
 
-        payment_result = self._payment.authorize(
-            request.payment_token, hold.total, hold.currency
-        )
+        try:
+            payment_result = self._payment.authorize(
+                request.payment_token, hold.total, hold.currency
+            )
+        except PaymentServiceUnavailableError:
+            return self._service_unavailable(hold)
 
         response = self._process_payment_result(hold, request, payment_result)
 
@@ -238,6 +241,29 @@ class ConfirmHoldUseCase:
                 f"Hold {hold.hold_id} remains active. "
                 "Payment may have succeeded; do NOT double-charge. "
                 "Client should verify before retrying."
+            ),
+        )
+
+    def _service_unavailable(self, hold) -> RejectedResponse:
+        """Circuit breaker OPEN: el servicio de pagos no esta disponible.
+
+        El hold permanece activo (NO se libera ni se vende).
+        El asiento NO se marca como SOLD.
+        """
+        self._audit.record(Transition(
+            hold_id=hold.hold_id,
+            seat_id=hold.seat_ids[0],
+            from_state=SeatStatus.HELD,
+            to_state=SeatStatus.HELD,
+            reason=TransitionReason.PAYMENT_SERVICE_UNAVAILABLE,
+            user_id=hold.user_id,
+        ))
+        return RejectedResponse(
+            reason="payment_service_unavailable",
+            detail=(
+                f"Hold {hold.hold_id} remains active. "
+                "Payment service is unavailable (circuit breaker OPEN). "
+                "Retry later. Seats are NOT released."
             ),
         )
 
