@@ -1,0 +1,89 @@
+REQUERIMIENTOS - NEXUS LIVE // T-80
+Motor de Reservas de Alta Concurrencia
+======================================
+
+1. REQUERIMIENTOS FUNCIONALES
+-----------------------------
+
+1.1 FASE 1 - SeatLock: Reservas Tempales
+    - RF-01: Cada asiento debe tener: seat_id, section, price, currency, status
+    - RF-02: Estados minimos: AVAILABLE, HELD, SOLD
+    - RF-03: Una reserva temporal (HOLD) debe contener: hold_id, user_id, event_id, lista de seat_ids, created_at, expires_at, status
+    - RF-04: Operaciones: consultar asientos, crear HOLD, consultar HOLD, liberar HOLD
+    - RF-05: Reserva todo-o-nada: si un asiento no esta disponible, la operacion falla completa
+    - RF-06: Expiracion automatica: un HOLD expira despues de TTL configurable (default 120s)
+    - RF-07: Limite de asientos por usuario configurable (default 6)
+    - RF-08: El precio lo controla el servidor (calculo desde el catalogo)
+    - RF-09: Transiciones de estado solo a traves de operaciones validas del dominio
+
+1.2 FASE 2 - Concurrencia e Idempotencia
+    - RF-10: Concurrencia segura: estructura thread-safe para cambios de estado
+    - RF-11: 100 solicitudes concurrentes por 1 asiento = exactamente 1 ganador
+    - RF-12: Idempotencia via Idempotency-Key: misma clave + mismo payload = mismo resultado
+    - RF-13: Conflicto de idempotencia: misma clave + payload diferente = IDEMPOTENCY_CONFLICT
+    - RF-14: 0 overselling bajo cualquier nivel de concurrencia
+
+1.3 FASE 3 - Confirmacion y Proveedor de Pagos
+    - RF-15: Convertir HOLD valido en venta confirmada
+    - RF-16: Servicio mock de pagos: APPROVED, DECLINED, ERROR, TIMEOUT
+    - RF-17: Pago aprobado -> HELD a SOLD, compra confirmada
+    - RF-18: Pago rechazado -> hold cancelado, asientos liberados
+    - RF-19: Timeout/error -> hold permanece activo (no liberar sin certeza)
+    - RF-20: Circuit breaker: CLOSED, OPEN, HALF_OPEN con parametros configurables
+    - RF-21: Circuit breaker OPEN -> PAYMENT_SERVICE_UNAVAILABLE, asiento NO se marca SOLD
+
+1.4 FASE 4 - Interfaz Grafica
+    - RF-22: Visualizar asientos con estados distinguibles (colores)
+    - RF-23: Seleccionar asientos y crear HOLD
+    - RF-24: Mostrar informacion de la reserva (hold_id, usuario, asientos, total, tiempo restante, estado)
+    - RF-25: Confirmar compra con payment_token de prueba
+    - RF-26: Simular carrera de concurrencia (N usuarios por 1 asiento)
+
+1.5 Trazabilidad
+    - RF-27: Cada cambio de estado debe registrar: user_id, hold_id, asientos, estado anterior, estado nuevo, timestamp, motivo
+    - RF-28: Debe poder consultarse la trazabilidad de una reserva
+
+2. REQUERIMIENTOS NO FUNCIONALES
+---------------------------------
+
+    - RNF-01: Arquitectura hexagonal (ports & adapters)
+    - RNF-02: Thread-safety demostrable bajo concurrencia real
+    - RNF-03: Tiempo de respuesta < 100ms para operaciones de reserva
+    - RNF-04: Codigo modular, legible y mantenible
+    - RNF-05: Tests automatizados para las 3 fases
+
+3. REQUERIMIENTOS TECNICOS
+---------------------------
+
+    - RT-01: Lenguaje: Python 3.11+
+    - RT-02: Framework web: FastAPI
+    - RT-03: Servidor ASGI: Uvicorn
+    - RT-04: Validacion: Pydantic v2
+    - RT-05: Testing: pytest + pytest-asyncio
+    - RT-06: Cliente HTTP para tests: httpx
+    - RT-07: Plantillas: Jinja2 (para interfaz web estatica)
+
+4. CASOS LIMITE
+---------------
+
+    - CL-01: seat_ids vacio
+    - CL-02: asiento inexistente
+    - CL-03: asiento duplicado en la misma solicitud
+    - CL-04: usuario inexistente o vacio
+    - CL-05: HOLD ya expirado
+    - CL-06: confirmar dos veces el mismo HOLD
+    - CL-07: confirmar un HOLD ya vendido
+    - CL-08: payment token vacio
+    - CL-09: solicitud simultanea durante expiracion
+    - CL-10: reintento despues de timeout
+    - CL-11: cantidad de asientos superior al limite
+    - CL-12: mismo asiento solicitado por multiples usuarios
+    - CL-13: mismo usuario con varios HOLD activos
+    - CL-14: proveedor de pagos lento
+    - CL-15: proveedor de pagos completamente caido
+
+5. BONOS IMPLEMENTADOS
+----------------------
+
+    - Bono B: Prueba de concurrencia real (200 usuarios, 1 asiento, 1 ganador)
+    - Bono C: Registro de auditoria reproducible (trazabilidad completa de transiciones)

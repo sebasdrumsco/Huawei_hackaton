@@ -1,0 +1,73 @@
+REGISTRO DE PROMPTS UTILIZADOS
+NEXUS LIVE // T-80
+==================
+
+Prompt 1 - Inicial (Arquitectura)
+---------------------------------
+Usuario: "revisa el RETO_3_NEXUS_LIVE.md ejecuta las 3 fases indicadas teniendo en cuenta las reglas 
+preestablecidas dentro del mismo archivo, ejecutalo en una arquitectura hexagonal dentro de una carpeta 
+llamada codigo dentro de sebastian-betancourt-g3 no olvides crear el archivo de requerimientos.txt 
+no olvides tener en cuenta las reglas ya definidas de .aiassistant/rules/Documentacion.md y 
+.aiassistant/rules/Promts.md"
+
+Accion de GLM 5.2: 
+- Analizo el enunciado completo del reto (993 lineas)
+- Leyo las reglas de Documentacion.md y Promts.md
+- Definio arquitectura hexagonal con Python + FastAPI
+- Creo estructura de carpetas: domain, application/ports, infrastructure, adapters/api, adapters/web
+- Implemento las 3 fases + Fase 4 (interfaz) + tests
+
+Prompt 2 - Diseno de Concurrencia (interno)
+--------------------------------------------
+Contexto: Como garantizar que 100 solicitudes concurrentes sobre 1 asiento produzcan exactamente 1 ganador.
+
+Decision de GLM 5.2:
+- Usar threading.RLock en InMemorySeatRepository
+- El caso de uso HoldSeatsUseCase adquiere el lock antes de verificar disponibilidad
+- El lock se libera en un bloque finally para garantizar liberacion
+- RLock reentrante permite llamadas anidadas dentro del mismo hilo
+
+Prompt 3 - Estrategia de Idempotencia (interno)
+-------------------------------------------------
+Contexto: Como manejar Idempotency-Key con replay y conflicto.
+
+Decision de GLM 5.2:
+- Calcular hash del payload: user_id|event_id|sorted(seat_ids)
+- Si la clave existe y el hash coincide: retornar resultado cacheado
+- Si la clave existe y el hash difiere: lanzar IdempotencyConflictError
+- Si la clave no existe: ejecutar operacion y guardar resultado
+
+Prompt 4 - Estrategia ante Timeout de Pago (interno)
+-----------------------------------------------------
+Contexto: Que hacer cuando el proveedor de pagos responde TIMEOUT o ERROR.
+
+Propuesta inicial de GLM 5.2: Liberar el hold inmediatamente en caso de timeout.
+Correccion del equipo: NO liberar el hold en timeout/error porque:
+- El pago podria haberse procesado (doble cobro)
+- Liberar el asiento mientras hay una operacion pendiente es incoherente
+- El hold debe permanecer activo hasta que el cliente verifique o expire por TTL
+
+Decision final: 
+- APPROVED -> SOLD
+- DECLINED -> liberar hold
+- ERROR/TIMEOUT -> hold permanece activo, cliente puede reintentar
+
+Prompt 5 - Circuit Breaker (interno)
+-------------------------------------
+Contexto: Implementar circuit breaker con CLOSED, OPEN, HALF_OPEN.
+
+Decision de GLM 5.2:
+- Umbral: 3 fallos consecutivos -> OPEN
+- Recovery: 15 segundos -> HALF_OPEN
+- HALF_OPEN: 1 llamada de prueba
+- Exito -> CLOSED; Fallo -> OPEN
+- Thread-safe con threading.Lock
+
+Prompt 6 - Test de Race Condition (interno)
+--------------------------------------------
+Contexto: Como demostrar concurrencia real con 200 usuarios.
+
+Decision de GLM 5.2:
+- Usar ThreadPoolExecutor con 200 hilos
+- threading.Barrier para sincronizar el inicio exacto
+- Verificar: 1 ganador, 199 rechazadas, 0 overselling
