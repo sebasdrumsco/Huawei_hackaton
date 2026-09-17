@@ -1,0 +1,26 @@
+/sebastian-betancourt-g3/
+# Variables de entorno
+.env
+*.env
+
+# Entornos virtuales
+.venv/
+venv/
+
+# Caché de Python
+__pycache__/
+
+# Archivos del sistema
+.DS_Store
+
+/.idea/
+.idea/
+.idea/modules.xml
+.idea/jarRepositories.xml
+.idea/compiler.xml
+.idea/libraries/
+.idea/workspace.xml
+*.iws
+*.iml
+*.ipr
+*.idea
